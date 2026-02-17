@@ -116,8 +116,8 @@ docker/
 
 ### 문제 1. ELK 8.x 버전 root 실행 제한 이슈
 ELK 8.x 버전에서는  
-**Elasticsearch, Kibana, Logstash를 root 권한으로 실행하는 것이 제한**되어 있었으며,  
-기존 컨테이너는 root 기반으로 실행되고 있었다.
+**Elasticsearch, Kibana, Logstash를 root 권한으로 실행하는 것이 제한**되어 있으며,  
+컨테이너를 root 기반으로 실행해야 하는 상황이였다.
 
 #### 해결 방법
 - Dockerfile에서 각 서비스의 전용 유저(`elasticsearch`, `kibana`, `logstash`) 활용
@@ -142,33 +142,11 @@ nohup su -s /bin/bash elasticsearch -c \
 - 볼륨 데이터 정리 후 재기동
 - 버전 업그레이드 시 데이터 호환성 이슈 가이드 문서화
 - 신규 환경 배포 시 초기화 프로세스 명확화
-- 플래그 파일(`/home/elastic_setup_done`)을 통한 초기화 상태 관리로 중복 실행 방지
+
 
 ---
 
-### 문제 3. ELK 이미지 빌드 시 버전 불일치 문제
-이미지 생성 시점마다  
-Elasticsearch / Logstash / Kibana 버전이 서로 다르게 설치되는 문제가 발생하였다.
-
-#### 해결 방법
-- Dockerfile 내 ELK 버전 명시적 고정: `ARG ELK_VERSION=8.15.2`
-- Elasticsearch, Logstash, Kibana 모두 **8.15.2 통일**
-- `apt-mark hold elasticsearch logstash kibana`를 통한 버전 고정
-- 운영 환경 간 버전 차이로 인한 장애 요소 제거
-
-**구현 예시**:
-```dockerfile
-ARG ELK_VERSION=8.15.2
-RUN apt-get install -y \
-    elasticsearch=${ELK_VERSION} \
-    logstash=1:${ELK_VERSION}-1 \
-    kibana=${ELK_VERSION} && \
-    apt-mark hold elasticsearch logstash kibana
-```
-
----
-
-### 문제 4. Elasticsearch 보안 설정 및 TLS 단계적 적용
+### 문제 3. Elasticsearch 보안 설정 및 TLS 단계적 적용
 기존 시스템은  
 HTTP 및 Transport 통신이 평문으로 동작하고 있었으며,  
 보안 설정이 부분적으로만 적용된 상태였다.
@@ -214,7 +192,7 @@ openssl pkcs12 -export \
 
 ---
 
-### 문제 5. Kibana 접근 및 인증 설정 이슈
+### 문제 4. Kibana 접근 및 인증 설정 이슈
 - Kibana ↔ Elasticsearch 인증 토큰 관리가 수동
 - SaaS / Stage / On-Premise 환경별 설정 혼재
 - Nginx 프록시 설정 문제로 외부 접근 불가
@@ -251,7 +229,7 @@ fi
 
 ---
 
-### 문제 6. Elasticsearch Keystore 비밀번호 잔재 문제
+### 문제 5. Elasticsearch Keystore 비밀번호 잔재 문제
 이미지 빌드 과정에서 생성된 keystore 비밀번호가 남아있어  
 컨테이너 시작 시 인증서 설정과 충돌하는 문제가 발생하였다.
 
@@ -285,31 +263,8 @@ done
 
 ---
 
-## 5. ELK Docker 보안 & 버전 업데이트 이력
 
-### (~1/15)
-- SaaS 설정 파일 자동화 스크립트 작성
-- Logstash Config / Pipeline / Dashboard 환경별 분리
-- ELK 롤링 업데이트 적용
-- 보안 설정(yml) 수정
-- Kibana 설정 파일 환경별 분리
-- 사업 운영팀 협업(대시보드 깨짐 이슈 수정)
-
-### (~2/3)
-- Elasticsearch HTTP / Transport TLS 적용 완료
-- 인증서 발급 스크립트 및 문서 작성
-- 보안 1단계 → 2단계 적용
-
-### (~2/5)
-- 2차 보안 업데이트 완료
-- 인증서 생성 자동화
-- Kibana 비밀번호 발급 및 설정 자동화
-- 고객사별 Space / Dashboard 구성 자동화
-- 신규 Docker 이미지 생성 및 정상 기동 확인
-
----
-
-## 6. 결과 및 성과
+## 5. 결과 및 성과
 
 ### 보안 강화
 - **ELK 8.x 기준 보안 정책 준수**: TLS 암호화 통신 적용으로 보안 수준 강화
@@ -336,7 +291,7 @@ done
 
 ---
 
-## 7. 사용 기술
+## 6. 사용 기술
 
 ### Container / Infra
 - **Docker**: 컨테이너화 및 이미지 관리
@@ -367,7 +322,7 @@ done
 
 ---
 
-## 8. 프로젝트 의의
+## 7. 프로젝트 의의
 
 본 프로젝트는 단순한 ELK 버전 업그레이드가 아닌,  
 **SaaS 환경에서 운영 중인 로그 분석 플랫폼을 보안·운영 관점에서 재설계한 프로젝트**이다.
@@ -389,26 +344,6 @@ ELK 8.x 보안 정책 대응,
 
 ---
 
-## 9. 기술적 세부사항
-
-### 인증서 생성 프로세스
-1. **Root CA 생성**: 4096bit RSA 키, 10년 유효기간
-2. **HTTP 인증서 생성**: SAN(Subject Alternative Name) 포함 (localhost, 127.0.0.1)
-3. **Transport 인증서 생성**: 노드 간 통신용
-4. **PKCS12 변환**: Elasticsearch에서 사용 가능한 형식으로 변환
-5. **인증서 배포**: Kibana, Logstash에 CA 인증서 복사 및 권한 설정
-
-### 환경별 설정 분리 전략
-- **SaaS / Stage**: 
-  - 보안 활성화 (`xpack.security.enabled: true`)
-  - TLS 암호화 (HTTP/Transport)
-  - 기본 인증 (`elastic` 계정)
-  - 다중 고객사 Space 지원
-- **On-Premise**: 
-  - 보안 비활성화 (`xpack.security.enabled: false`)
-  - HTTP 평문 통신
-  - 단일 고객사 Space 지원
-
 ### 자동화 스크립트 흐름
 1. 환경 변수 확인 (`DEPLOY_ENV`)
 2. 디렉토리 및 권한 설정
@@ -422,12 +357,7 @@ ELK 8.x 보안 정책 대응,
 10. Kibana 시작 및 대기
 11. Space 및 Dashboard 생성/임포트
 
----
 
-## 10. 향후 개선 방향
-
-1. **Role/User 기반 접근 제어 고도화**: 고객사별 Role 및 User 자동 생성
-2. **모니터링 및 알림**: ELK 스택 상태 모니터링 및 장애 알림 체계 구축
 3. **백업 및 복구**: 인덱스 데이터 백업 및 복구 프로세스 자동화
 4. **성능 최적화**: 인덱스 샤딩 전략 및 성능 튜닝
 5. **CI/CD 통합**: Docker 이미지 빌드 및 배포 파이프라인 자동화
