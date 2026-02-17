@@ -1,0 +1,26 @@
+# This file is where you define your pipelines. You can define multiple.
+# This file is where you define your pipelines. You can define multiple.
+# For more information on multiple pipelines, see the documentation:
+#   https://www.elastic.co/guide/en/logstash/current/multiple-pipelines.html
+
+- pipeline.id: hyundaicard
+  path.config: "/etc/logstash/conf.d/service/hyundaicard_import_mysql.conf"
+  pipeline.ecs_compatibility: disabled
+- pipeline.id: hmg
+  path.config: "/etc/logstash/conf.d/service/hmg_import_mysql.conf"
+  pipeline.ecs_compatibility: disabled
+- pipeline.id: apptestai
+  path.config: "/etc/logstash/conf.d/service/apptestai_import_mysql.conf"
+  pipeline.ecs_compatibility: disabled
+- pipeline.id: juis_har
+  path.config: "/etc/logstash/conf.d/service/juis_har.conf"
+  pipeline.ecs_compatibility: disabled
+# - pipeline.id: lg
+#   path.config: "/etc/logstash/conf.d/service/lg_dashboard_http.conf"
+#   pipeline.ecs_compatibility: disabled
+- pipeline.id: hatci
+  path.config: "/etc/logstash/conf.d/service/hatci_import_mysql.conf"
+  pipeline.ecs_compatibility: disabled
+- pipeline.id: hmg_page_loading_time
+  path.config: "/etc/logstash/conf.d/service/hmg_page_loading_time_mysql.conf"
+  pipeline.ecs_compatibility: disabled
