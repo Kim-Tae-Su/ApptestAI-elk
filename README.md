@@ -40,7 +40,7 @@ SaaS / On-Premise 환경별 설정이 혼재된 상태였다.
 - **자동화 스크립트**: 컨테이너 시작 시 `start.sh`를 통해 인증서 생성, 보안 설정, 서비스 기동 자동화
 - **TLS 암호화**: Elasticsearch HTTP(9200) / Transport(9300) 통신에 TLS 적용
 - **환경별 설정 분리**: Logstash Pipeline, Kibana Dashboard, 보안 설정은 환경별 파일로 분리
-- **멀티 환경 지원**: SaaS / Stage / On-Premise 환경에 동일 이미지 배포 가능
+- **멀티 환경 지원**: SaaS / On-Premise 환경에 동일 이미지 배포 가능
 
 ### 주요 구성 요소
 
@@ -49,66 +49,60 @@ SaaS / On-Premise 환경별 설정이 혼재된 상태였다.
 docker/
 ├── dockerfile              # ELK 8.15.2 통합 이미지 정의
 ├── start.sh                # 컨테이너 시작 시 실행 스크립트 (자동화 핵심)
-├── build.sh                # 이미지 빌드 스크립트
-├── run.sh                  # 컨테이너 실행 스크립트
-├── elasticsearch.yml       # Elasticsearch 설정 (SaaS/Stage용)
-├── kibana.yml              # Kibana 설정 (SaaS/Stage용)
-├── logstash.yml            # Logstash 공통 설정
+├── elasticsearch.yml       # Elasticsearch 설정 (SaaS/On-Premise용)
+├── kibana.yml              # Kibana 설정 (SaaS/On-Premise용)
+├── logstash.yml            # Logstash 설정
 ├── pipelines/              # 환경별 Logstash 파이프라인 설정
 │   ├── pipelines_service.yml
-│   ├── pipelines_stage.yml
 │   └── pipelines_onpremise.yml
 ├── logstash_config/        # 환경별 Logstash 입력/필터/출력 설정
 │   └── conf.d/
 │       ├── service/
-│       ├── stage/
 │       └── on_premise/
-├── dashboard/              # 고객사별 Kibana Dashboard (ndjson)
-│   ├── apptest-ai/
-│   ├── hatci/
-│   ├── hmg/
-│   ├── hyundai-card/
+├── dashboard/              # Kibana Dashboard (ndjson)
+│   ├── service/
 │   ├── on-premise/
-│   └── publicspace/
 └── unsecured_onpremise/    # On-Premise용 비보안 설정
     ├── elasticsearch.yml
     └── kibana.yml
 ```
+
+### 자동화 스크립트 실행 흐름
+1. 환경 변수 확인 (`DEPLOY_ENV`)
+2. 디렉토리 및 권한 설정
+3. Keystore 정합성 확인 및 정리
+4. 환경별 설정 파일 선택
+5. TLS 인증서 생성 (최초 실행 시)
+6. Elasticsearch 시작 및 대기
+7. 인덱스 생성 (최초 실행 시)
+8. Logstash 시작
+9. Kibana 비밀번호 발급 및 설정
+10. Kibana 시작 및 대기
+11. Space 및 Dashboard 생성/임포트
 
 ---
 
 ## 3. 담당 역할
 
 ### ELK Docker 표준 이미지 설계
-- Elasticsearch · Logstash · Kibana Docker 이미지 구조 설계
-- 이미지 빌드 시 버전 고정 (`ARG ELK_VERSION=8.15.2`) 적용
-- `apt-mark hold`를 통한 버전 고정으로 업그레이드 방지
-- root 권한 실행 제한 정책(8.x) 대응
+- Elasticsearch · Logstash · Kibana 통합 Docker 이미지 구조 설계
+- ELK 8.x 버전 고정 및 root 실행 제한 정책 대응
+- 단일 이미지 기반 배포 일관성 및 운영 단순화
 
 ### 보안 설정 및 인증 체계 구축
-- **TLS 인증서 자동 생성**: 컨테이너 시작 시 OpenSSL을 통한 자체 서명 인증서 생성
-  - Root CA 인증서 (4096bit RSA, 10년 유효기간)
-  - HTTP 인증서 (SAN 포함: localhost, 127.0.0.1)
-  - Transport 인증서 (노드 간 통신용)
-- **Elasticsearch 보안 설정**: HTTP(9200) / Transport(9300) TLS 암호화 적용
-- **Kibana ↔ Elasticsearch 인증**: `elasticsearch-reset-password`를 통한 `kibana_system` 비밀번호 자동 발급 및 설정
-- **인증서 배포 자동화**: 생성된 인증서를 Kibana, Logstash에 자동 복사 및 권한 설정
+- ELK 8.x 보안 정책 기반 TLS 암호화 통신 적용
+- 컨테이너 기동 시 인증서 생성·배포 자동화
+- Kibana ↔ Elasticsearch 인증 계정 자동 설정
 
 ### SaaS 운영 자동화
-- **Bash 스크립트 기반 자동화**: `start.sh`를 통한 컨테이너 실행·초기화 자동화
-- **초기 세팅 자동화**: 
-  - Elasticsearch 인덱스 생성 (환경별 인덱스 매핑 정의)
-  - Kibana Space 생성 (고객사별 Space 자동 생성)
-  - Dashboard 임포트 (ndjson 파일 기반 자동 임포트)
-- **플래그 파일 기반 중복 실행 방지**: `/home/elastic_setup_done`, `/.certs_initialized` 등으로 초기화 상태 관리
-- **환경별 파이프라인 자동 선택**: `DEPLOY_ENV` 환경 변수에 따라 적절한 파이프라인 설정 파일 자동 선택
+- Bash 스크립트 기반 컨테이너 초기화·기동 자동화
+- 인덱스, Kibana Space, Dashboard 자동 생성·임포트
+- 플래그 파일 기반 중복 실행 방지 로직 구현
 
 ### 환경별 설정 분리 관리
-- **Logstash Config / Pipeline 분리**: `pipelines_${DEPLOY_ENV}.yml` 형식으로 환경별 분리
-- **Kibana Dashboard(ndjson) 환경별 분리**: 고객사별 디렉토리 구조로 관리
-- **SaaS / Stage / On-Premise 설정 파일 독립 관리**: 
-  - SaaS/Stage: 보안 설정 활성화 (`xpack.security.enabled: true`)
-  - On-Premise: 보안 설정 비활성화 (`xpack.security.enabled: false`)
+- SaaS / Stage / On-Premise 환경별 설정 파일 분리
+- 환경 변수 기반 Logstash 파이프라인 자동 선택
+- 보안 설정 활성/비활성 정책 환경별 적용
 
 ---
 
@@ -117,7 +111,7 @@ docker/
 ### 문제 1. ELK 8.x 버전 root 실행 제한 이슈
 ELK 8.x 버전에서는  
 **Elasticsearch, Kibana, Logstash를 root 권한으로 실행하는 것이 제한**되어 있으며,  
-컨테이너를 root 기반으로 실행해야 하는 상황이였다.
+컨테이너를 root 기반으로 실행해야 하는 상황이었다.
 
 #### 해결 방법
 - Dockerfile에서 각 서비스의 전용 유저(`elasticsearch`, `kibana`, `logstash`) 활용
@@ -134,19 +128,8 @@ nohup su -s /bin/bash elasticsearch -c \
 
 ---
 
-### 문제 2. 기존 7.x 데이터 볼륨과 8.x 호환성 문제
-기존 볼륨 마운트 디렉토리에  
-**Elasticsearch 7.16.3 데이터가 남아 있어 8.x 기동 실패** 문제가 발생하였다.
 
-#### 해결 방법
-- 볼륨 데이터 정리 후 재기동
-- 버전 업그레이드 시 데이터 호환성 이슈 가이드 문서화
-- 신규 환경 배포 시 초기화 프로세스 명확화
-
-
----
-
-### 문제 3. Elasticsearch 보안 설정 및 TLS 단계적 적용
+### 문제 2. Elasticsearch 보안 설정 및 TLS 적용
 기존 시스템은  
 HTTP 및 Transport 통신이 평문으로 동작하고 있었으며,  
 보안 설정이 부분적으로만 적용된 상태였다.
@@ -161,6 +144,7 @@ HTTP 및 Transport 통신이 평문으로 동작하고 있었으며,
 - **인증서 배포 자동화**: 생성된 인증서를 Kibana, Logstash에 자동 복사
 - **1단계 → 2단계 보안 적용 프로세스 정립**
 - **인증서 발급 및 적용 절차 문서화**
+- Elasticsearch, Kibana, Logstash 설정 파일에 HTTP / Transport TLS 관련 설정을 반영
 
 **구현 예시**:
 ```bash
@@ -192,21 +176,21 @@ openssl pkcs12 -export \
 
 ---
 
-### 문제 4. Kibana 접근 및 인증 설정 이슈
+### 문제 3. Kibana 접근 및 인증 설정 이슈
 - Kibana ↔ Elasticsearch 인증 토큰 관리가 수동
-- SaaS / Stage / On-Premise 환경별 설정 혼재
-- Nginx 프록시 설정 문제로 외부 접근 불가
+- Nginx 프록시 단에서 인증으로 인해 외부 접근이 제한된 상태
 
 #### 해결 방법
-- **Elasticsearch 계정 생성 후 Kibana 비밀번호 자동 발급**: 
-  - `elasticsearch-reset-password` 유틸리티를 사용하여 `kibana_system` 계정 비밀번호 자동 생성
-  - 생성된 비밀번호를 `kibana.yml`에 자동 설정
-- **Kibana 설정 파일 자동 수정 스크립트 작성**: 
-  - `sed` 명령을 통해 `elasticsearch.password` 설정 자동 업데이트
-- **환경별 Kibana yml 설정 분리**: 
-  - SaaS/Stage: HTTPS 연결, 인증 활성화
-  - On-Premise: HTTP 연결, 인증 비활성화
-- **Nginx 설정 수정 및 접근 가이드 정리**
+- **Kibana 비밀번호 발급 및 설정 파일 자동 수정 스크립트 작성**:
+  - `elasticsearch-reset-password` 유틸리티를 사용하여
+    `kibana_system` 계정 비밀번호 자동 생성
+  - `sed` 명령을 통해 생성된 비밀번호를
+    `kibana.yml`에 자동 업데이트
+- **Nginx Reverse Proxy 기반 인증 처리**:
+  - Kibana 접근 시 로그인 화면을 노출하지 않도록
+    Nginx에서 Basic Auth 토큰을 사전 생성
+  - `Authorization` 헤더에 인증 정보를 인코딩하여 전달함으로써
+    사용자 인증 절차를 프록시 단에서 처리
 
 **구현 예시**:
 ```bash
@@ -229,7 +213,7 @@ fi
 
 ---
 
-### 문제 5. Elasticsearch Keystore 비밀번호 잔재 문제
+### 문제 4. Elasticsearch Keystore 비밀번호 잔재 문제
 이미지 빌드 과정에서 생성된 keystore 비밀번호가 남아있어  
 컨테이너 시작 시 인증서 설정과 충돌하는 문제가 발생하였다.
 
@@ -261,8 +245,21 @@ for KEY in "${KEYS[@]}"; do
 done
 ```
 
+
+
 ---
 
+### 문제 5. 기존 7.x 데이터 볼륨과 8.x 호환성 문제
+기존 볼륨 마운트 디렉토리에  
+**Elasticsearch 7.16.3 데이터가 남아 있어 8.x 기동 실패** 문제가 발생하였다.
+
+#### 해결 방법
+- 볼륨 데이터 정리 후 재기동
+- 버전 업그레이드 시 데이터 호환성 이슈 가이드 문서화
+- 신규 환경 배포 시 초기화 프로세스 명확화
+
+
+---
 
 ## 5. 결과 및 성과
 
@@ -333,31 +330,13 @@ ELK 8.x 보안 정책 대응,
 **운영 안정성 · 보안성 · 유지보수성을 동시에 개선**하였다.
 
 이를 통해 로그 분석 인프라를  
-장기적으로 안정 운영 가능한 **표준 플랫폼 구조**로 전환하였다.
+장기적으로 안정 운영 가능하며  
+운영 및 배포 관점에서 재사용 가능한  
+**ELK 표준 플랫폼 구조로 전환하였다.**
 
-### 핵심 성과 요약
-1. **보안 강화**: TLS 암호화 통신 적용, 인증서 자동 생성 및 배포
-2. **운영 자동화**: 초기 설정 자동화로 수동 작업 제거
-3. **환경 표준화**: 단일 이미지로 다중 환경 지원
-4. **버전 통일**: ELK 스택 버전 일관성 확보
-5. **유지보수성 향상**: 환경별 설정 분리 및 자동화 스크립트 기반 운영
+
 
 ---
 
-### 자동화 스크립트 흐름
-1. 환경 변수 확인 (`DEPLOY_ENV`)
-2. 디렉토리 및 권한 설정
-3. Keystore 정합성 확인 및 정리
-4. 환경별 설정 파일 선택
-5. TLS 인증서 생성 (최초 실행 시)
-6. Elasticsearch 시작 및 대기
-7. 인덱스 생성 (최초 실행 시)
-8. Logstash 시작
-9. Kibana 비밀번호 발급 및 설정
-10. Kibana 시작 및 대기
-11. Space 및 Dashboard 생성/임포트
 
 
-3. **백업 및 복구**: 인덱스 데이터 백업 및 복구 프로세스 자동화
-4. **성능 최적화**: 인덱스 샤딩 전략 및 성능 튜닝
-5. **CI/CD 통합**: Docker 이미지 빌드 및 배포 파이프라인 자동화
