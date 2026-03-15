@@ -1,368 +1,227 @@
+# ELK Docker 기반 보안 및 운영 자동화
 
-# ApptestAI-elk
-
-# ELK Dashboard 프로젝트
-
-ELK (Elasticsearch, Logstash, Kibana) 스택을 사용하여 다양한 고객사의 테스트 데이터를 수집, 저장, 시각화하는 대시보드 시스템입니다.
-
-## 프로젝트 개요
-
-이 프로젝트는 MySQL 데이터베이스에서 테스트 데이터를 수집하여 Elasticsearch에 인덱싱하고, Kibana를 통해 대시보드로 시각화합니다. 여러 환경(service, stage, onpremise)과 고객사별로 분리된 Space를 지원합니다.
-
-## 주요 기능
-
-- **데이터 수집**: Logstash를 통해 MySQL에서 주기적으로 데이터 수집 (5분 간격)
-- **데이터 저장**: Elasticsearch에 구조화된 인덱스로 데이터 저장
-- **시각화**: Kibana를 통한 대시보드 제공
-- **다중 환경 지원**: service, stage, onpremise 환경별 설정 분리
-- **고객사별 Space**: 각 고객사별로 독립된 Kibana Space 제공
-
-## 프로젝트 구조
-
-```
-dashboard_elk/
-├── docker/
-│   ├── build.sh                    # Docker 이미지 빌드 스크립트
-│   ├── run.sh                      # Docker 컨테이너 실행 스크립트
-│   ├── start.sh                    # 컨테이너 내부 시작 스크립트
-│   ├── dockerfile                  # Docker 이미지 정의
-│   ├── elasticsearch.yml           # Elasticsearch 설정
-│   ├── kibana.yml                  # Kibana 설정
-│   ├── logstash.yml                # Logstash 설정
-│   ├── pipelines/                  # Logstash 파이프라인 설정
-│   │   ├── pipelines_service.yml
-│   │   ├── pipelines_stage.yml
-│   │   └── pipelines_onpremise.yml
-│   ├── logstash_config/            # Logstash 입력/필터/출력 설정
-│   │   └── conf.d/
-│   │       ├── service/            # service 환경 설정
-│   │       ├── stage/              # stage 환경 설정
-│   │       └── on_premise/         # onpremise 환경 설정
-│   └── dashboard/                  # Kibana 대시보드 정의 파일
-│       ├── apptest-ai/
-│       ├── hatci/
-│       ├── hmg/
-│       ├── hyundai-card/
-│       ├── on-premise/
-│       └── publicspace/
-└── README.md
-```
+## 1. 프로젝트 개요
 
-### Docker 이미지 빌드
+- **프로젝트명**: ELK Docker 기반 보안 및 운영 자동화
+- **프로젝트 소속**: ApptestAI
+- **프로젝트 기간**: 2025.12 ~ 2026.02
+- **프로젝트 인원**: 1명
 
-```bash
-cd /opt/apps/apptest.ai/apis
-cd dashboard_elk
-git checkout branch
-git pull origin
-cd docker
-sudo bash build.sh 0 0 v1.0.0
-```
+### 프로젝트 배경
 
-예시:
-```bash
-./build.sh 0 0 v1.0.0
-```
+ELK(Stack)는 Elasticsearch, Logstash, Kibana로 구성된 로그 분석 플랫폼으로,
+데이터 수집(Logstash) → 저장·검색(Elasticsearch) → 시각화(Kibana) 구조를 가진다.
 
-## 실행 방법
+본 시스템은 SaaS 서비스의 로그 수집·분석을 담당하는 핵심 인프라였으나,
+운영 과정에서 다음과 같은 문제가 존재하였다.
 
-### 기본 실행 (stage 환경)
+- Elasticsearch 7.x 기반 노후 버전 사용
+- TLS 및 인증 정책이 부분 적용된 상태
+- 환경별 설정 혼재로 인한 운영 복잡도 증가
+- 수동 배포 및 수동 초기 설정
 
-```bash
-docker run --net apptestnet -e TZ=Asia/Seoul -p 9203:9200 -p 5601:5601 \
--v /var/lib/elk/elasticsearch:/var/lib/elasticsearch \
--v /var/lib/elk/logstash:/var/lib/logstash \
--v /var/lib/elk/kibana:/var/lib/kibana \
--v /etc/elk/certs:/etc/elasticsearch/certs
---restart unless-stopped \
--e DEPLOY_ENV=stage \
--it -d --name dashboard apptestai/dashboard:v2.0.0
-```
+이에 따라 ELK 8.x 기준 보안 정책을 반영하고,
+Docker 기반 표준 이미지 구조로 재설계하여
+운영 자동화와 보안 강화를 동시에 달성하는 것을 목표로 프로젝트를 수행하였다.
 
-### 환경 변수
+### ELK 기본 구조 개요
+<img src="./images/elk.png" width="600"/>
 
-- `DEPLOY_ENV`: 배포 환경 설정
-  - `service`: 서비스 환경 (기본 인덱스: hmg, hyundai_card, page_loading_time_hmg, juis_har, pivot-apptestai)
-  - `stage`: 스테이징 환경 (service와 동일)
-  - `onpremise`: 온프레미스 환경 (기본값, 최소 설정)
+---
 
-- `TZ`: 타임존 설정 (기본값: Asia/Seoul)
+## 2. 시스템 아키텍처
 
-### 포트 매핑
+본 시스템은 Elasticsearch · Logstash · Kibana를
+**단일 Docker 이미지**로 구성하고,
+컨테이너 기동 시 `start.sh`를 통해 모든 초기화 및 설정을 자동 수행하는 구조로 설계되었다.
 
-- `9203:9200`: Elasticsearch HTTP API
-- `5601:5601`: Kibana 웹 인터페이스
+<img src="./images/elk_architecture.png" width="700"/>
 
-### 볼륨 마운트
+### 설계 의사결정 (Architecture Decision Record)
 
-- `/var/lib/elk/elasticsearch`: Elasticsearch 데이터 영구 저장
-- `/var/lib/elk/logstash`: Logstash 데이터 영구 저장
-- `/var/lib/elk/kibana`: Kibana 데이터 영구 저장
-- SSL 인증서 파일: Kibana HTTPS 설정용
+#### 단일 Docker 이미지 구조 채택
 
-## Elasticsearch 인덱스
+일반적으로 ELK는 각 컴포넌트를 분리하여 운영하는 것이 일반적이나,
+본 프로젝트에서는 단일 이미지 구조를 채택하였다.
 
-### service/stage 환경 인덱스
+**채택 이유:**
 
-- **hmg**: 현대자동차 테스트 데이터
-- **hyundai_card**: 현대카드 테스트 데이터
-- **page_loading_time_hmg**: HMG 페이지 로딩 시간 데이터
-- **juis_har**: JUIS HAR 데이터
-- **pivot-apptestai**: Apptest AI 피벗 데이터
-- **apptestai**: Apptest AI 테스트 데이터 (Logstash 자동 생성)
+- SaaS 환경에서 빠른 배포 및 복구 필요
+- 버전 불일치 리스크 제거 (ES / Logstash / Kibana 버전 통일)
+- On-Premise 고객사 배포 단순화
+- 운영 인력 최소 환경 고려
 
-### 인덱스 생성 시점
+**트레이드오프:**
 
-- 대부분의 인덱스는 `start.sh`에서 명시적으로 생성됩니다.
-- `start.sh`에 명시되지 않은 인덱스는 Logstash가 첫 데이터를 수집할 때 자동으로 생성됩니다.
+- 개별 컴포넌트 스케일링 불가
+- 단일 장애 지점(Single Point of Failure) 존재
 
-## Logstash 파이프라인
+운영 환경 특성상 “확장성”보다 “배포 일관성과 단순성”을 우선하여 설계하였다.
 
-### service 환경 파이프라인
+---
 
-- `hyundaicard`: 현대카드 데이터 수집
-- `hmg`: HMG 데이터 수집
-- `apptestai`: Apptest AI 데이터 수집 (5분 간격)
-- `juis_har`: JUIS HAR 데이터 수집
-- `hatci`: HATCI 데이터 수집
-- `hmg_page_loading_time`: HMG 페이지 로딩 시간 데이터 수집
+## 3. 자동화 실행 구조
 
-### 데이터 수집 주기
+### 컨테이너 시작 시 자동 수행 프로세스
 
-- 대부분의 파이프라인: 5분 간격 (`*/5 * * * * Asia/Seoul`)
+1. 환경 변수 확인 (`DEPLOY_ENV`)
+2. 디렉토리 및 권한 정합성 확보
+3. Keystore 정리
+4. TLS 인증서 자동 생성
+5. Elasticsearch 기동 및 상태 대기
+6. 초기 인덱스 생성
+7. Logstash 기동
+8. Kibana 비밀번호 자동 발급
+9. Kibana 기동
+10. Space 및 Dashboard 자동 생성
 
-## Kibana Space 및 Dashboard
+---
 
-### service/stage 환경 Space
+## 4. 기술적 문제 및 해결
 
-- **apptest-ai**: Apptest AI 대시보드
-- **hatci**: HATCI 대시보드
-- **hmg**: HMG 대시보드
-- **hsc**: 현대카드 대시보드
-- **publicspace**: 공개 데이터 대시보드
+### 문제 1. ELK 8.x Root 실행 제한
 
-### onpremise 환경 Space
+ELK 8.x에서는 root 권한 실행이 제한되며,
+컨테이너 환경과 충돌이 발생하였다.
 
-- **customer**: 고객 대시보드
+#### 해결
 
-각 Space는 시작 시 자동으로 생성되며, 해당 디렉토리의 `.ndjson` 파일로부터 대시보드를 자동으로 임포트합니다.
+- 각 서비스 전용 유저 활용 (`elasticsearch`, `kibana`, `logstash`)
+- `su -s /bin/bash` 기반 권한 분리 실행
+- 디렉토리 권한 자동 설정
 
-## 서비스 관리
+---
 
-### 컨테이너 접속
+### 문제 2. 7.x Data Volume 재사용에 따른 8.x 기동 실패
 
-```bash
-docker exec -it dashboard /bin/bash
-```
+Elasticsearch 7.16.3의 `path.data` 디렉토리를  
+8.15 컨테이너에 그대로 마운트하여 기동을 시도하였으나  
+노드 시작 단계에서 실패하였다.
 
-### Elasticsearch 관리
+로그에는 다음과 같은 오류가 발생하였다.
 
-#### 프로세스 확인
+- `incompatible index version`
+- `node metadata version mismatch`
 
-```bash
-ps -ef | grep elasticsearch
-```
+Elasticsearch는 메이저 버전(7 → 8) 간 내부 저장 구조가 변경되며,
 
-출력 예시:
-```
-embian         7       1  0 18:07 pts/0    00:00:02 /usr/share/elasticsearch/jdk/bin/java -Xms4m -Xmx64m ...
-```
-위 예시에서 `7`이 프로세스 ID입니다.
+- Lucene major version 변경
+- Node metadata 포맷 변경
+- System index 및 cluster metadata 구조 변경
 
-#### 프로세스 종료
+이로 인해 7.x에서 생성된 data 디렉토리는  
+8.x에서 직접 재사용할 수 없다.
 
-```bash
-kill -9 <프로세스ID>
-```
+기존 7.x 데이터가 남아 있는 상태에서 8.x 노드를 기동하면  
+버전 충돌로 인해 Elasticsearch가 시작을 차단한다.
 
-#### 프로세스 시작
 
-```bash
-/usr/share/elasticsearch/bin/elasticsearch &
-```
+#### 해결 전략
 
-#### 상태 확인
+7.x data volume을 직접 재사용하지 않고,  
+Snapshot + Reindex 기반 마이그레이션 전략을 적용하였다.
 
-```bash
-curl http://localhost:9200
-```
+Reindex 방식을 선택한 이유는
+메이저 버전 간 Lucene 세그먼트 포맷 차이로 인해
+Snapshot Restore만으로는 내부 구조 정합성을 보장할 수 없었기 때문이다.
+Snapshot은 운영 데이터 보호 및 논리 복구 용도로 활용하고
+실제 8.x 마이그레이션은 Reindex를 통해 내부 구조를 재구성했다.
 
-#### 인덱스 목록 확인
 
-```bash
-curl http://localhost:9200/_cat/indices?v
-```
+#### 적용 절차
 
-### Logstash 관리
+1. 운영 중인 Elasticsearch 7.16에서 Clean Snapshot 생성  
+2. 7.16 임시 컨테이너에 Snapshot Restore
+3. Elasticsearch 8.15에서 Reindex-from-Remote 수행
 
-#### 프로세스 확인
+<img src="./images/change.png" width="700"/>
 
-```bash
-ps -ef | grep logstash
-```
 
-출력 예시:
-```
-embian       923     708 99 18:21 pts/1    00:00:48 /usr/share/logstash/jdk/bin/java -Xms1g -Xmx1g ...
-```
-위 예시에서 `923`이 프로세스 ID입니다.
+---
 
-#### 프로세스 종료
+### 문제 3. TLS 및 보안 정책 미적용
 
-```bash
-kill -9 <프로세스ID>
-```
+기존 시스템은 HTTP/Transport 통신이 평문으로 동작.
 
-#### 프로세스 시작
+#### 해결
 
-```bash
-/usr/share/logstash/bin/logstash --path.settings /etc/logstash &
-```
+- Root CA 생성
+- HTTP / Transport 인증서 자동 생성
+- PKCS12 변환 자동화
+- Kibana/Logstash 인증서 자동 배포
 
-#### 로그 확인
+컨테이너 기동 시 TLS 설정이 자동 적용되도록 구성하였다.
 
-```bash
-tail -f /var/log/logstash/stdout.log
-```
+---
 
-#### 파이프라인 상태 확인
+### 문제 4. Keystore 비밀번호 잔재 문제
 
-```bash
-curl http://localhost:9600/_node/pipelines?pretty
-```
+빌드 시 생성된 keystore secure_password 값이 남아
+TLS 설정과 충돌 발생.
 
-### Kibana 관리
+#### 해결
 
-#### 프로세스 확인
+- 컨테이너 시작 시 keystore 키 자동 탐색 및 제거
+- 정합성 확보 후 Elasticsearch 기동
 
-```bash
-ps -ef | grep kibana
-```
+---
 
-출력 예시:
-```
-embian       227       1  3 18:07 pts/0    00:00:40 /usr/share/kibana/bin/../node/glibc-217/bin/node ...
-```
-위 예시에서 `227`이 프로세스 ID입니다.
+## 5. 운영 안정성 확보 전략
 
-#### 프로세스 종료
+본 프로젝트는 단순 업그레이드가 아닌,
+운영 리스크를 최소화하는 구조 설계를 목표로 하였다.
 
-```bash
-kill -9 <프로세스ID>
-```
+### 적용 전략
 
-#### 프로세스 시작
+- Snapshot 기반 백업 체계 확보
+- Idempotent 초기화 설계 (플래그 파일 기반 중복 방지)
+- TLS 재생성 시 기존 인증서 유지 전략
+- Keystore 자동 정리 로직 구현
+- 환경 변수 기반 설정 자동 분기
+- 버전 고정 (8.15.2)으로 예측 가능한 배포 확보
 
-```bash
-/usr/share/kibana/bin/kibana -c /etc/kibana/kibana.yml &
-```
+---
 
-#### 상태 확인
+## 6. 개선 전 / 개선 후 비교
 
-```bash
-curl http://localhost:5601/api/status
-```
+| 항목 | 개선 전 | 개선 후 |
+|------|---------|---------|
+| ELK 버전 | 7.x 혼재 | 8.15.2 통일 |
+| 보안 | 부분 적용 | TLS 전면 적용 |
+| 인증서 | 수동 생성 | 자동 생성 |
+| 배포 방식 | 수동 | 컨테이너 자동화 |
+| 인덱스 생성 | 수동 | 자동 |
+| Dashboard 설정 | 수동 | 자동 임포트 |
+| 환경 관리 | 혼재 | ENV 기반 분리 |
 
-## 트러블슈팅
+---
 
-### Elasticsearch가 시작되지 않는 경우
+## 7. 결과 및 성과
 
-1. 로그 확인:
-   ```bash
-   tail -f /var/log/elasticsearch/stdout.log
-   ```
+### 보안 강화
+- ELK 8.x 기준 보안 정책 준수
+- TLS 통신 적용
+- 인증 자동화
 
-2. 디렉토리 권한 확인:
-   ```bash
-   ls -la /var/lib/elasticsearch
-   chown -R elasticsearch:elasticsearch /var/lib/elasticsearch
-   ```
+### 운영 효율성 향상
+- 초기 세팅 시간: 수 시간 → 수 분 단축
+- 환경별 설정 자동 분기
+- 수동 작업 제거
 
-### Logstash가 데이터를 수집하지 않는 경우
+### 정량적 성과
+- 3개 환경(Service / Stage / On-Premise) 지원
+- 6개 고객사 Space 자동 생성
+- 모든 컴포넌트 8.15.2 통일
 
-1. 로그 확인:
-   ```bash
-   tail -f /var/log/logstash/stdout.log
-   ```
+---
 
-2. MySQL 연결 확인:
-   - Logstash 설정 파일에서 데이터베이스 연결 정보 확인
-   - 네트워크 연결 가능 여부 확인
+## 8. 프로젝트 의의
 
-3. 파이프라인 설정 확인:
-   ```bash
-   cat /etc/logstash/pipelines.yml
-   ```
+본 프로젝트는 단순 ELK 업그레이드가 아니라,
+메이저 버전 마이그레이션 전략 수립,
+보안 정책 표준화,
+운영 자동화 체계 구축까지 수행한
+플랫폼 재설계 프로젝트이다.
 
-### Kibana가 접속되지 않는 경우
-
-1. 로그 확인:
-   ```bash
-   tail -f /var/log/kibana/stdout.log
-   ```
-
-2. Elasticsearch 연결 확인:
-   ```bash
-   curl http://localhost:9200
-   ```
-
-3. 포트 확인:
-   ```bash
-   netstat -tlnp | grep 5601
-   ```
-
-### 인덱스가 생성되지 않는 경우
-
-- `apptestai` 인덱스는 Logstash가 첫 데이터를 수집할 때 자동 생성됩니다.
-- 최대 5분 정도 기다린 후 확인:
-  ```bash
-  curl http://localhost:9200/_cat/indices?v | grep apptestai
-  ```
-
-### 대시보드가 표시되지 않는 경우
-
-1. Kibana Space 확인:
-   - Kibana 웹 인터페이스에서 Space 목록 확인
-   - Space가 생성되지 않았다면 컨테이너 재시작
-
-2. 대시보드 파일 확인:
-   ```bash
-   ls -la /home/dashboard/
-   ```
-
-## 참고 사항
-
-- 모든 서비스는 컨테이너 시작 시 자동으로 시작됩니다.
-- 초기 설정은 `/home/elastic_setup_done` 플래그 파일로 관리됩니다.
-- 인덱스 매핑은 `start.sh`에서 명시적으로 정의됩니다.
-- 대시보드는 컨테이너 시작 시 자동으로 임포트됩니다.
-- ELK 버전: 8.15.2 (dockerfile에서 고정)
-- MySQL Connector 버전: 8.0.28
-
-## 버전 정보
-
-- **Elasticsearch**: 8.15.2
-- **Logstash**: 8.15.2
-- **Kibana**: 8.15.2
-- **MySQL Connector**: 8.0.28
-- **Base Image**: Ubuntu 22.04 LTS (Jammy)
-
-## 접속 정보
-
-### Elasticsearch
-- URL: `http://localhost:9203` (호스트에서)
-- 컨테이너 내부: `http://localhost:9200`
-- 기본 인증: `elastic` / `embian1001` (service/stage 환경)
-
-### Kibana
-- URL: `http://localhost:5601`
-- 기본 인증: `elastic` / `embian1001` (service/stage 환경)
-
-## 주의사항
-
-1. **데이터 영구 저장**: 볼륨 마운트를 통해 데이터를 영구 저장하도록 설정되어 있습니다.
-2. **네트워크**: Docker 네트워크 설정이 필요합니다 (`--net apptestnet` 또는 `--net ptero_network`).
-3. **SSL 인증서**: Kibana HTTPS 설정을 위해 SSL 인증서 파일이 필요합니다.
-4. **초기 설정**: 첫 실행 시 인덱스 생성 및 대시보드 임포트에 시간이 걸릴 수 있습니다.
-5. **메모리**: ELK 스택은 메모리를 많이 사용하므로 충분한 리소스를 할당해야 합니다.
->>>>>>> f3e00f2 (elk dashboard)
+이를 통해 로그 분석 인프라를
+운영 중심 구조에서 플랫폼 중심 구조로 전환하였다.
