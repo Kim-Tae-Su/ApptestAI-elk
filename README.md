@@ -81,15 +81,17 @@ Snapshot + Reindex 기반 마이그레이션 전략을 적용하여 데이터 �
 ## 4. 기술적 문제 및 해결
 
 ### 문제 1. ELK 8.x Root 실행 제한
+운영 환경 특성상 Docker 컨테이너를 root 권한으로 실행해야 했으나,           
+ELK 8.x는 보안 정책상 Elasticsearch, Kibana, Logstash 프로세스의 root 실행을 제한하고 있었다.
 
-ELK 8.x에서는 root 권한 실행이 제한되며,
-컨테이너 환경과 충돌이 발생하였다.
+이로 인해 컨테이너 내부에서 ELK 서비스가 root 권한으로 기동되면서           
+서비스 시작이 실패하는 문제가 발생하였다.
 
 #### 해결
-
-- 각 서비스 전용 유저 활용 (`elasticsearch`, `kibana`, `logstash`)
-- `su -s /bin/bash` 기반 권한 분리 실행
-- 디렉토리 권한 자동 설정
+- 컨테이너는 root 권한으로 실행하되, 각 서비스는 비권한 사용자로 실행되도록 구성
+- `su -s /bin/bash` 기반 프로세스 권한 분리 적용
+- 데이터 디렉토리 및 설정 파일 권한 자동 설정 로직 구현
+- 컨테이너 시작 시 권한 검증 및 초기화 작업 자동 수행
 
 ---
 
@@ -141,29 +143,37 @@ Snapshot은 운영 데이터 보호 및 논리 복구 용도로 활용하고
 ---
 
 ### 문제 3. TLS 및 보안 정책 미적용
+기존 ELK 환경은 TLS 및 인증 정책이 일관되게 적용되지 않아,       
+환경별 보안 설정 편차가 발생할 수 있었으며 초기 구축 시 수동 설정 작업이 필요하였다.
 
-기존 시스템은 HTTP/Transport 통신이 평문으로 동작.
+또한 Elasticsearch 8.x 보안 기능을 활용하기 위해서는      
+인증서 생성 및 배포 과정을 표준화할 필요가 있었다.
 
 #### 해결
-
-- Root CA 생성
-- HTTP / Transport 인증서 자동 생성
-- PKCS12 변환 자동화
-- Kibana/Logstash 인증서 자동 배포
-
-컨테이너 기동 시 TLS 설정이 자동 적용되도록 구성하였다.
+- Root CA(Certificate Authority) 자동 생성
+- Elasticsearch HTTP / Transport Layer 인증서 자동 발급
+- PKCS#12 형식 변환 자동화
+- Kibana 및 Logstash 인증서 자동 배포
+- 컨테이너 기동 시 TLS 설정 및 보안 구성 자동 적용
+- Elasticsearch Security(Authentication) 설정 자동화
 
 ---
 
-### 문제 4. Keystore 비밀번호 잔재 문제
+### 문제 4. Elasticsearch Keystore 보안 설정 충돌
 
-빌드 시 생성된 keystore secure_password 값이 남아
-TLS 설정과 충돌 발생.
+Elasticsearch 재배포 및 버전 업그레이드 과정에서         
+기존 Keystore에 저장된 `secure_password` 설정이 유지되면서,        
+새롭게 생성된 TLS 인증서 정보와 불일치하는 문제가 발생하였다.        
+
+이로 인해 Elasticsearch 기동 시 SSL 설정 검증 단계에서 오류가 발생하여        
+서비스가 정상적으로 시작되지 않았다.        
 
 #### 해결
+- 컨테이너 시작 시 Elasticsearch Keystore 상태 점검
+- 기존 `secure_password` 관련 설정 자동 탐색 및 제거
+- TLS 인증서 설정과 Keystore 정보 정합성 검증
+- 검증 완료 후 Elasticsearch 기동하도록 초기화 프로세스 구성
 
-- 컨테이너 시작 시 keystore 키 자동 탐색 및 제거
-- 정합성 확보 후 Elasticsearch 기동
 
 ---
 
@@ -171,20 +181,28 @@ TLS 설정과 충돌 발생.
 ## 5. 결과 및 성과
 
 ### 보안 강화
-- ELK 8.x 기준 보안 정책 준수
-- TLS 통신 적용
-- 인증 자동화
+- Elasticsearch 8.x 보안 정책 적용
+- TLS 기반 암호화 통신 환경 구축
+- 인증서 생성 및 배포 자동화
+- ELK 컴포넌트 간 보안 설정 표준화
 
 ### 운영 효율성 향상
-- 초기 세팅 시간: 수 시간 → 수 분 단축
-- 환경별 설정 자동 분기
-- 수동 작업 제거
+- 초기 구축 및 설정 시간 단축 (수 시간 → 수 분)
+- 컨테이너 기동만으로 환경 구성 자동화
+- 인증서 생성, 인덱스 생성, Dashboard 구성 자동화
+- 수동 설정 작업 제거 및 운영 절차 표준화
+
+### 안정성 확보
+- Elasticsearch 7.x → 8.x 마이그레이션 완료
+- Snapshot + Reindex 기반 데이터 이전 수행
+- Keystore 및 TLS 설정 충돌 문제 해결
+- 환경 재현성 확보를 통한 배포 안정성 향상
 
 ### 정량적 성과
-- 3개 환경(Service / Stage / On-Premise) 지원
-- 6개 고객사 Space 자동 생성
-- 모든 컴포넌트 8.15.2 통일
-
+- Service / Stage / On-Premise 등 3개 운영 환경 지원
+- 고객사별 Kibana Space 6개 자동 생성
+- Elasticsearch · Logstash · Kibana 버전 8.15.2 통일
+- 단일 Docker 이미지 기반 배포 체계 구축
 ---
 
 ## 6. 사용기술
