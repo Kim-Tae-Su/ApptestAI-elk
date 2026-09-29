@@ -1,0 +1,137 @@
+# Docker 22.04 LTS
+FROM ubuntu:jammy
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Seoul
+
+
+# ===========================
+# 기본 패키지 설치 및 환경 설정
+# .bashrc 파일에 JAVA_HOME 환경 변수 추가
+# ===========================
+RUN apt-get update && \
+    apt-get install -y \
+    tzdata \
+    locales \
+    vim \
+    curl \
+    sudo \
+    wget \
+    unzip \
+    jq \
+    git \
+    software-properties-common \
+    libmariadb-dev \
+    openjdk-17-jdk && \
+    ln -sf /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone && \
+    localedef -f UTF-8 -i ko_KR ko_KR.UTF-8 && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+ENV TZ="Asia/Seoul"
+ENV LC_ALL=ko_KR.UTF-8
+RUN echo 'export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64' >> /root/.bashrc
+
+# ===========================
+# Elasticsearch, Logstash, Kibana 설치 (버전 고정)
+# Elastic 공식 GPG 키 등록 & APT Repository 추가
+# ===========================
+ARG ELK_VERSION=8.15.2
+
+RUN wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor -o /usr/share/keyrings/elastic-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/elastic-archive-keyring.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main" \
+      > /etc/apt/sources.list.d/elastic-8.x.list && \
+    apt-get update && \
+    apt-get install -y \
+        elasticsearch=${ELK_VERSION} \
+        logstash=1:${ELK_VERSION}-1 \
+        kibana=${ELK_VERSION} && \
+    apt-mark hold elasticsearch logstash kibana
+
+# ===========================
+# 사용자 추가 및 권한 설정
+# ===========================
+# RUN if [ "${USER_ID}" -ne 0 ]; then \
+#         if ! getent group embian >/dev/null; then groupadd -g "${GROUP_ID}" embian; fi; \
+#         if ! id -u embian >/dev/null 2>&1; then useradd -m -u "${USER_ID}" -g embian -s /usr/sbin/nologin embian; fi; \
+#         echo 'embian ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers; \
+#         usermod -aG elasticsearch,logstash,kibana embian; \
+#     else \
+#         usermod -aG elasticsearch,logstash,kibana root; \
+#     fi
+
+# ===========================
+# Logstash 파이프라인 및 설정 복사
+# ===========================
+RUN rm -rf /etc/logstash/pipelines
+COPY pipelines/ /etc/logstash/pipelines/
+RUN rm -f /etc/logstash/logstash.yml
+COPY logstash.yml /etc/logstash/logstash.yml
+RUN rm -rf /etc/logstash/conf.d
+COPY logstash_config/conf.d /etc/logstash/conf.d
+
+# ===========================
+# Elasticsearch 설정 복사
+# ===========================
+RUN rm -f /etc/elasticsearch/elasticsearch.yml /etc/elasticsearch/jvm.options
+COPY elasticsearch.yml /etc/elasticsearch/elasticsearch.yml
+COPY jvm.options /etc/elasticsearch/jvm.options
+
+# ===========================
+# TODO: Elasticsearch keystore 정합성 정리 (TLS 자동설정 잔재 제거)
+# ===========================
+# RUN if [ -f /etc/elasticsearch/elasticsearch.keystore ]; then \
+#       chown elasticsearch:elasticsearch /etc/elasticsearch/elasticsearch.keystore && \
+#       su -s /bin/bash elasticsearch -c "\
+#         /usr/share/elasticsearch/bin/elasticsearch-keystore remove xpack.security.transport.ssl.keystore.secure_password || true && \
+#         /usr/share/elasticsearch/bin/elasticsearch-keystore remove xpack.security.transport.ssl.truststore.secure_password || true && \
+#         /usr/share/elasticsearch/bin/elasticsearch-keystore remove xpack.security.http.ssl.keystore.secure_password || true \
+#       "; \
+#     fi
+
+# ===========================
+# Kibana 설정 복사
+# ===========================
+RUN rm -f /etc/kibana/kibana.yml
+COPY kibana.yml /etc/kibana/kibana.yml
+
+# ===========================
+# onpremise 설정 복사
+# ===========================
+RUN rm -f /etc/elasticsearch/onpremise/elasticsearch.yml
+RUN rm -f /etc/kibana/onpremise/kibana.yml
+COPY unsecured_onpremise/elasticsearch.yml /etc/elasticsearch/onpremise/elasticsearch.yml
+COPY unsecured_onpremise/kibana.yml /etc/kibana/onpremise/kibana.yml
+
+# ===========================
+# MySQL Connector 설치
+# ===========================
+WORKDIR /usr/share/java
+ARG MYSQL_CONNECTOR_VERSION=8.0.28
+RUN wget https://dev.mysql.com/Downloads/Connector-J/mysql-connector-java-${MYSQL_CONNECTOR_VERSION}.zip && \
+    unzip mysql-connector-java-${MYSQL_CONNECTOR_VERSION}.zip && \
+    rm -f mysql-connector-java-${MYSQL_CONNECTOR_VERSION}.zip
+
+# ===========================
+# Dashboard 관련 파일 복사
+# ===========================
+COPY dashboard/ /home/dashboard/
+
+# ===========================
+# ELK 관련 디렉토리 권한 설정
+# ===========================
+# RUN chown -R elasticsearch:elasticsearch /var/lib/elasticsearch /var/log/elasticsearch /etc/elasticsearch && \
+#     chown -R logstash:logstash /var/lib/logstash /var/log/logstash /usr/share/logstash/data /etc/logstash && \
+#     chown -R kibana:kibana /var/lib/kibana /var/log/kibana /var/run/kibana /etc/kibana
+
+# ===========================
+# start.sh 복사
+# ===========================
+COPY start.sh /home/start.sh
+RUN chmod 755 /home/start.sh
+
+# ===========================
+# CMD: root로 진입 후 내부에서 gosu로 유저 전환
+# ===========================
+USER root
+CMD ["/bin/bash", "/home/start.sh"]

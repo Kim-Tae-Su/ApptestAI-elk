@@ -1,0 +1,7 @@
+# This file is where you define your pipelines. You can define multiple.
+# This file is where you define your pipelines. You can define multiple.
+# For more information on multiple pipelines, see the documentation:
+#   https://www.elastic.co/guide/en/logstash/current/multiple-pipelines.html
+
+- pipeline.id: apptestai
+  path.config: "/etc/logstash/conf.d/on_premise/apptestai_import_mysql.conf"

@@ -1,0 +1,37 @@
+```yaml
+# Logstash Multiple Pipelines Configuration
+#
+# 여러 데이터 수집 파이프라인을 독립적으로 구성하여
+# 서비스별로 별도의 Logstash Pipeline을 실행할 수 있습니다.
+#
+# 실제 고객사명, 서비스명 및 사내 경로는 공개하지 않습니다.
+
+- pipeline.id: service_a
+  path.config: "/etc/logstash/conf.d/service/service_a_import_mysql.conf"
+  pipeline.ecs_compatibility: disabled
+
+- pipeline.id: service_b
+  path.config: "/etc/logstash/conf.d/service/service_b_import_mysql.conf"
+  pipeline.ecs_compatibility: disabled
+
+- pipeline.id: service_c
+  path.config: "/etc/logstash/conf.d/service/service_c_import_mysql.conf"
+  pipeline.ecs_compatibility: disabled
+
+- pipeline.id: service_d
+  path.config: "/etc/logstash/conf.d/service/service_d.conf"
+  pipeline.ecs_compatibility: disabled
+
+# 필요에 따라 Pipeline을 추가할 수 있습니다.
+# - pipeline.id: service_e
+#   path.config: "/etc/logstash/conf.d/service/service_e_dashboard.conf"
+#   pipeline.ecs_compatibility: disabled
+
+- pipeline.id: service_e
+  path.config: "/etc/logstash/conf.d/service/service_e_import_mysql.conf"
+  pipeline.ecs_compatibility: disabled
+
+- pipeline.id: service_f
+  path.config: "/etc/logstash/conf.d/service/service_f_page_loading_time.conf"
+  pipeline.ecs_compatibility: disabled
+```
